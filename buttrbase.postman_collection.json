@@ -1,0 +1,499 @@
+{
+  "info": {
+    "name": "ButtrBase API",
+    "_postman_id": "buttrbase-api-collection",
+    "description": "ButtrBase REST + WebSocket API. Set `baseUrl` and `apiKey` in your environment.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{apiKey}}", "type": "string" }]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "if (!pm.environment.get('baseUrl')) {",
+          "  pm.environment.set('baseUrl', 'https://stagingapi.buttrbase.com');",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "https://stagingapi.buttrbase.com" },
+    { "key": "orgUuid", "value": "00000000-0000-0000-0000-000000000000" }
+  ],
+  "item": [
+    {
+      "name": "Auth & Identity",
+      "item": [
+        {
+          "name": "Magic Link - Send",
+          "request": {
+            "method": "POST",
+            "auth": { "type": "noauth" },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"alice@example.com\",\n  \"redirect_to\": \"https://app.buttrbase.com/dashboard\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/auth/magic-link/send", "host": ["{{baseUrl}}"], "path": ["api","auth","magic-link","send"] }
+          }
+        },
+        {
+          "name": "Magic Link - Verify",
+          "request": {
+            "method": "POST",
+            "auth": { "type": "noauth" },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"token\": \"<magic-link-token>\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/auth/magic-link/verify", "host": ["{{baseUrl}}"], "path": ["api","auth","magic-link","verify"] }
+          }
+        },
+        {
+          "name": "MFA - Status",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/auth/mfa/status", "host": ["{{baseUrl}}"], "path": ["api","auth","mfa","status"] }
+          }
+        },
+        {
+          "name": "MFA - TOTP Enroll",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"label\": \"My phone\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/auth/mfa/totp/enroll", "host": ["{{baseUrl}}"], "path": ["api","auth","mfa","totp","enroll"] }
+          }
+        },
+        {
+          "name": "MFA - TOTP Activate",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"code\": \"123456\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/auth/mfa/totp/activate", "host": ["{{baseUrl}}"], "path": ["api","auth","mfa","totp","activate"] }
+          }
+        },
+        {
+          "name": "MFA - TOTP Verify",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"code\": \"123456\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/auth/mfa/totp/verify", "host": ["{{baseUrl}}"], "path": ["api","auth","mfa","totp","verify"] }
+          }
+        },
+        {
+          "name": "MFA - TOTP Challenge",
+          "request": {
+            "method": "POST",
+            "auth": { "type": "noauth" },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"mfa_token\": \"<challenge-jwt>\",\n  \"code\": \"123456\",\n  \"recovery\": false\n}" },
+            "url": { "raw": "{{baseUrl}}/api/auth/mfa/totp/challenge", "host": ["{{baseUrl}}"], "path": ["api","auth","mfa","totp","challenge"] }
+          }
+        },
+        {
+          "name": "MFA - TOTP Disable",
+          "request": {
+            "method": "DELETE",
+            "url": { "raw": "{{baseUrl}}/api/auth/mfa/totp", "host": ["{{baseUrl}}"], "path": ["api","auth","mfa","totp"] }
+          }
+        },
+        {
+          "name": "MFA - Generate Recovery Codes",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{baseUrl}}/api/auth/mfa/recovery-codes", "host": ["{{baseUrl}}"], "path": ["api","auth","mfa","recovery-codes"] }
+          }
+        },
+        {
+          "name": "MFA - Redeem Recovery Code",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"code\": \"abcd1234\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/auth/mfa/recovery-codes/redeem", "host": ["{{baseUrl}}"], "path": ["api","auth","mfa","recovery-codes","redeem"] }
+          }
+        },
+        {
+          "name": "OIDC - Authorize",
+          "request": {
+            "method": "GET",
+            "auth": { "type": "noauth" },
+            "url": { "raw": "{{baseUrl}}/api/auth/oidc/:connection_uuid/authorize", "host": ["{{baseUrl}}"], "path": ["api","auth","oidc",":connection_uuid","authorize"], "variable": [{ "key": "connection_uuid", "value": "00000000-0000-0000-0000-000000000000" }] }
+          }
+        },
+        {
+          "name": "OIDC - Callback",
+          "request": {
+            "method": "GET",
+            "auth": { "type": "noauth" },
+            "url": { "raw": "{{baseUrl}}/api/auth/oidc/callback?code=&state=", "host": ["{{baseUrl}}"], "path": ["api","auth","oidc","callback"], "query": [{ "key": "code", "value": "" }, { "key": "state", "value": "" }] }
+          }
+        },
+        {
+          "name": "SAML - Authorize",
+          "request": {
+            "method": "GET",
+            "auth": { "type": "noauth" },
+            "url": { "raw": "{{baseUrl}}/api/auth/saml/:connection_uuid/authorize", "host": ["{{baseUrl}}"], "path": ["api","auth","saml",":connection_uuid","authorize"], "variable": [{ "key": "connection_uuid", "value": "00000000-0000-0000-0000-000000000000" }] }
+          }
+        },
+        {
+          "name": "SAML - ACS Callback",
+          "request": {
+            "method": "POST",
+            "auth": { "type": "noauth" },
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "body": { "mode": "urlencoded", "urlencoded": [{ "key": "SAMLResponse", "value": "" }, { "key": "RelayState", "value": "" }] },
+            "url": { "raw": "{{baseUrl}}/api/auth/saml/callback", "host": ["{{baseUrl}}"], "path": ["api","auth","saml","callback"] }
+          }
+        },
+        {
+          "name": "Org by Domain",
+          "request": {
+            "method": "GET",
+            "auth": { "type": "noauth" },
+            "url": { "raw": "{{baseUrl}}/api/auth/orgs-by-domain/:domain", "host": ["{{baseUrl}}"], "path": ["api","auth","orgs-by-domain",":domain"], "variable": [{ "key": "domain", "value": "example.com" }] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin Portal",
+      "item": [
+        {
+          "name": "Issue Admin-Portal Token",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{baseUrl}}/api/admin/organizations/{{orgUuid}}/admin-portal/issue", "host": ["{{baseUrl}}"], "path": ["api","admin","organizations","{{orgUuid}}","admin-portal","issue"] }
+          }
+        },
+        {
+          "name": "Exchange Admin-Portal Token",
+          "request": {
+            "method": "POST",
+            "auth": { "type": "noauth" },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"token\": \"<one-time-token>\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/admin-portal/exchange", "host": ["{{baseUrl}}"], "path": ["api","admin-portal","exchange"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Coupons & Gift Cards",
+      "item": [
+        {
+          "name": "Validate Coupon",
+          "request": {
+            "method": "POST",
+            "auth": { "type": "noauth" },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"code\": \"SAVE20\",\n  \"product_id\": 17,\n  \"cart_labels\": [\"pro\"]\n}" },
+            "url": { "raw": "{{baseUrl}}/api/coupons/validate", "host": ["{{baseUrl}}"], "path": ["api","coupons","validate"] }
+          }
+        },
+        {
+          "name": "Validate Gift Card",
+          "request": {
+            "method": "POST",
+            "auth": { "type": "noauth" },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"code\": \"GC-ABC123\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/gift-cards/validate", "host": ["{{baseUrl}}"], "path": ["api","gift-cards","validate"] }
+          }
+        },
+        {
+          "name": "Redeem Gift Card",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"code\": \"GC-ABC123\",\n  \"amount_cents\": 5000,\n  \"user_id\": 42\n}" },
+            "url": { "raw": "{{baseUrl}}/api/gift-cards/redeem", "host": ["{{baseUrl}}"], "path": ["api","gift-cards","redeem"] }
+          }
+        },
+        {
+          "name": "Set Coupon Labels",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"labels\": [\"pro\", \"annual\"]\n}" },
+            "url": { "raw": "{{baseUrl}}/api/admin/coupons/:id/labels", "host": ["{{baseUrl}}"], "path": ["api","admin","coupons",":id","labels"], "variable": [{ "key": "id", "value": "1" }] }
+          }
+        },
+        {
+          "name": "Add Coupon Label",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"label\": \"enterprise\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/admin/coupons/:id/labels", "host": ["{{baseUrl}}"], "path": ["api","admin","coupons",":id","labels"], "variable": [{ "key": "id", "value": "1" }] }
+          }
+        },
+        {
+          "name": "Remove Coupon Label",
+          "request": {
+            "method": "DELETE",
+            "url": { "raw": "{{baseUrl}}/api/admin/coupons/:id/labels/:label", "host": ["{{baseUrl}}"], "path": ["api","admin","coupons",":id","labels",":label"], "variable": [{ "key": "id", "value": "1" }, { "key": "label", "value": "pro" }] }
+          }
+        },
+        {
+          "name": "Set Product Tags",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"tags\": [\"saas\", \"flagship\"]\n}" },
+            "url": { "raw": "{{baseUrl}}/api/admin/products/:id/tags", "host": ["{{baseUrl}}"], "path": ["api","admin","products",":id","tags"], "variable": [{ "key": "id", "value": "1" }] }
+          }
+        },
+        {
+          "name": "Add Product Tag",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"tag\": \"beta\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/admin/products/:id/tags", "host": ["{{baseUrl}}"], "path": ["api","admin","products",":id","tags"], "variable": [{ "key": "id", "value": "1" }] }
+          }
+        },
+        {
+          "name": "Remove Product Tag",
+          "request": {
+            "method": "DELETE",
+            "url": { "raw": "{{baseUrl}}/api/admin/products/:id/tags/:tag", "host": ["{{baseUrl}}"], "path": ["api","admin","products",":id","tags",":tag"], "variable": [{ "key": "id", "value": "1" }, { "key": "tag", "value": "beta" }] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "SCIM",
+      "item": [
+        {
+          "name": "ServiceProviderConfig",
+          "request": { "method": "GET", "auth": { "type": "noauth" }, "url": { "raw": "{{baseUrl}}/scim/v2/ServiceProviderConfig", "host": ["{{baseUrl}}"], "path": ["scim","v2","ServiceProviderConfig"] } }
+        },
+        {
+          "name": "ResourceTypes",
+          "request": { "method": "GET", "auth": { "type": "noauth" }, "url": { "raw": "{{baseUrl}}/scim/v2/ResourceTypes", "host": ["{{baseUrl}}"], "path": ["scim","v2","ResourceTypes"] } }
+        },
+        {
+          "name": "Schemas",
+          "request": { "method": "GET", "auth": { "type": "noauth" }, "url": { "raw": "{{baseUrl}}/scim/v2/Schemas", "host": ["{{baseUrl}}"], "path": ["scim","v2","Schemas"] } }
+        },
+        {
+          "name": "List Users",
+          "request": {
+            "method": "GET",
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{scimToken}}" }] },
+            "url": { "raw": "{{baseUrl}}/scim/v2/Users?filter=userName eq \"alice\"&startIndex=1&count=20", "host": ["{{baseUrl}}"], "path": ["scim","v2","Users"], "query": [{ "key": "filter", "value": "userName eq \"alice\"" }, { "key": "startIndex", "value": "1" }, { "key": "count", "value": "20" }] }
+          }
+        },
+        {
+          "name": "Create User",
+          "request": {
+            "method": "POST",
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{scimToken}}" }] },
+            "header": [{ "key": "Content-Type", "value": "application/scim+json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"schemas\": [\"urn:ietf:params:scim:schemas:core:2.0:User\"],\n  \"userName\": \"alice@example.com\",\n  \"externalId\": \"ext-1\",\n  \"active\": true,\n  \"emails\": [{ \"value\": \"alice@example.com\", \"primary\": true }],\n  \"name\": { \"givenName\": \"Alice\", \"familyName\": \"Liddell\" }\n}" },
+            "url": { "raw": "{{baseUrl}}/scim/v2/Users", "host": ["{{baseUrl}}"], "path": ["scim","v2","Users"] }
+          }
+        },
+        {
+          "name": "Get User",
+          "request": { "method": "GET", "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{scimToken}}" }] }, "url": { "raw": "{{baseUrl}}/scim/v2/Users/:id", "host": ["{{baseUrl}}"], "path": ["scim","v2","Users",":id"], "variable": [{ "key": "id", "value": "" }] } }
+        },
+        {
+          "name": "Replace User",
+          "request": {
+            "method": "PUT",
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{scimToken}}" }] },
+            "header": [{ "key": "Content-Type", "value": "application/scim+json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"userName\": \"alice@example.com\",\n  \"active\": true\n}" },
+            "url": { "raw": "{{baseUrl}}/scim/v2/Users/:id", "host": ["{{baseUrl}}"], "path": ["scim","v2","Users",":id"], "variable": [{ "key": "id", "value": "" }] }
+          }
+        },
+        {
+          "name": "Patch User",
+          "request": {
+            "method": "PATCH",
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{scimToken}}" }] },
+            "header": [{ "key": "Content-Type", "value": "application/scim+json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"schemas\": [\"urn:ietf:params:scim:api:messages:2.0:PatchOp\"],\n  \"Operations\": [{ \"op\": \"replace\", \"path\": \"active\", \"value\": false }]\n}" },
+            "url": { "raw": "{{baseUrl}}/scim/v2/Users/:id", "host": ["{{baseUrl}}"], "path": ["scim","v2","Users",":id"], "variable": [{ "key": "id", "value": "" }] }
+          }
+        },
+        {
+          "name": "Delete User",
+          "request": { "method": "DELETE", "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{scimToken}}" }] }, "url": { "raw": "{{baseUrl}}/scim/v2/Users/:id", "host": ["{{baseUrl}}"], "path": ["scim","v2","Users",":id"], "variable": [{ "key": "id", "value": "" }] } }
+        },
+        {
+          "name": "Issue SCIM Token (admin)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Okta primary\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/admin/organizations/{{orgUuid}}/scim-tokens", "host": ["{{baseUrl}}"], "path": ["api","admin","organizations","{{orgUuid}}","scim-tokens"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Webhooks",
+      "item": [
+        {
+          "name": "List Endpoints",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/admin/organizations/{{orgUuid}}/webhook-endpoints", "host": ["{{baseUrl}}"], "path": ["api","admin","organizations","{{orgUuid}}","webhook-endpoints"] } }
+        },
+        {
+          "name": "Create Endpoint",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"url\": \"https://example.com/hooks\",\n  \"event_types\": [\"mfa.enrolled\", \"user.created\"],\n  \"description\": \"primary\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/admin/organizations/{{orgUuid}}/webhook-endpoints", "host": ["{{baseUrl}}"], "path": ["api","admin","organizations","{{orgUuid}}","webhook-endpoints"] }
+          }
+        },
+        {
+          "name": "Delete Endpoint",
+          "request": { "method": "DELETE", "url": { "raw": "{{baseUrl}}/api/admin/organizations/{{orgUuid}}/webhook-endpoints/:id", "host": ["{{baseUrl}}"], "path": ["api","admin","organizations","{{orgUuid}}","webhook-endpoints",":id"], "variable": [{ "key": "id", "value": "1" }] } }
+        },
+        {
+          "name": "List Deliveries",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/admin/organizations/{{orgUuid}}/webhook-deliveries", "host": ["{{baseUrl}}"], "path": ["api","admin","organizations","{{orgUuid}}","webhook-deliveries"] } }
+        }
+      ]
+    },
+    {
+      "name": "Domains",
+      "item": [
+        {
+          "name": "List Domains",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/admin/organizations/{{orgUuid}}/domains", "host": ["{{baseUrl}}"], "path": ["api","admin","organizations","{{orgUuid}}","domains"] } }
+        },
+        {
+          "name": "Claim Domain",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"domain\": \"acme.com\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/admin/organizations/{{orgUuid}}/domains", "host": ["{{baseUrl}}"], "path": ["api","admin","organizations","{{orgUuid}}","domains"] }
+          }
+        },
+        {
+          "name": "Verify Domain",
+          "request": { "method": "POST", "url": { "raw": "{{baseUrl}}/api/admin/organizations/{{orgUuid}}/domains/:id/verify", "host": ["{{baseUrl}}"], "path": ["api","admin","organizations","{{orgUuid}}","domains",":id","verify"], "variable": [{ "key": "id", "value": "1" }] } }
+        },
+        {
+          "name": "Delete Domain",
+          "request": { "method": "DELETE", "url": { "raw": "{{baseUrl}}/api/admin/organizations/{{orgUuid}}/domains/:id", "host": ["{{baseUrl}}"], "path": ["api","admin","organizations","{{orgUuid}}","domains",":id"], "variable": [{ "key": "id", "value": "1" }] } }
+        }
+      ]
+    },
+    {
+      "name": "Signing & Vault",
+      "item": [
+        {
+          "name": "List Signing Keys",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/admin/organizations/{{orgUuid}}/signing-keys", "host": ["{{baseUrl}}"], "path": ["api","admin","organizations","{{orgUuid}}","signing-keys"] } }
+        },
+        {
+          "name": "Rotate Signing Key",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"grace_days\": 7,\n  \"scopes\": [\"read:users\", \"write:billing\"]\n}" },
+            "url": { "raw": "{{baseUrl}}/api/admin/organizations/{{orgUuid}}/signing-keys/rotate", "host": ["{{baseUrl}}"], "path": ["api","admin","organizations","{{orgUuid}}","signing-keys","rotate"] }
+          }
+        },
+        {
+          "name": "Sign JWT",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"claims\": { \"sub\": \"user_123\", \"scope\": \"read:users\" },\n  \"ttl_seconds\": 3600\n}" },
+            "url": { "raw": "{{baseUrl}}/api/orgs/{{orgUuid}}/sign", "host": ["{{baseUrl}}"], "path": ["api","orgs","{{orgUuid}}","sign"] }
+          }
+        },
+        {
+          "name": "Sign Document (detached)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"document_b64\": \"SGVsbG8sIHdvcmxkIQ==\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/orgs/{{orgUuid}}/sign-document", "host": ["{{baseUrl}}"], "path": ["api","orgs","{{orgUuid}}","sign-document"] }
+          }
+        },
+        {
+          "name": "Org JWKS (public)",
+          "request": { "method": "GET", "auth": { "type": "noauth" }, "url": { "raw": "{{baseUrl}}/orgs/{{orgUuid}}/.well-known/jwks.json", "host": ["{{baseUrl}}"], "path": ["orgs","{{orgUuid}}",".well-known","jwks.json"] } }
+        },
+        {
+          "name": "List Secrets",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/admin/organizations/{{orgUuid}}/secrets", "host": ["{{baseUrl}}"], "path": ["api","admin","organizations","{{orgUuid}}","secrets"] } }
+        },
+        {
+          "name": "Put Secret",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"value\": \"my-secret-value\",\n  \"description\": \"stripe webhook signing key\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/admin/organizations/{{orgUuid}}/secrets/:name", "host": ["{{baseUrl}}"], "path": ["api","admin","organizations","{{orgUuid}}","secrets",":name"], "variable": [{ "key": "name", "value": "stripe_webhook_secret" }] }
+          }
+        },
+        {
+          "name": "Delete Secret",
+          "request": { "method": "DELETE", "url": { "raw": "{{baseUrl}}/api/admin/organizations/{{orgUuid}}/secrets/:name", "host": ["{{baseUrl}}"], "path": ["api","admin","organizations","{{orgUuid}}","secrets",":name"], "variable": [{ "key": "name", "value": "stripe_webhook_secret" }] } }
+        },
+        {
+          "name": "Get Secret (read plaintext)",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/orgs/{{orgUuid}}/secrets/:name", "host": ["{{baseUrl}}"], "path": ["api","orgs","{{orgUuid}}","secrets",":name"], "variable": [{ "key": "name", "value": "stripe_webhook_secret" }] } }
+        }
+      ]
+    },
+    {
+      "name": "mTLS",
+      "item": [
+        {
+          "name": "Get CA",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/admin/organizations/{{orgUuid}}/certificate-authority", "host": ["{{baseUrl}}"], "path": ["api","admin","organizations","{{orgUuid}}","certificate-authority"] } }
+        },
+        {
+          "name": "Init CA",
+          "request": { "method": "POST", "url": { "raw": "{{baseUrl}}/api/admin/organizations/{{orgUuid}}/certificate-authority/init", "host": ["{{baseUrl}}"], "path": ["api","admin","organizations","{{orgUuid}}","certificate-authority","init"] } }
+        },
+        {
+          "name": "List Certificates",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/admin/organizations/{{orgUuid}}/certificates", "host": ["{{baseUrl}}"], "path": ["api","admin","organizations","{{orgUuid}}","certificates"] } }
+        },
+        {
+          "name": "Issue Certificate",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"common_name\": \"svc.example.com\",\n  \"sans\": [\"svc.internal\"],\n  \"ttl_days\": 90,\n  \"service_identity_id\": null\n}" },
+            "url": { "raw": "{{baseUrl}}/api/admin/organizations/{{orgUuid}}/certificates", "host": ["{{baseUrl}}"], "path": ["api","admin","organizations","{{orgUuid}}","certificates"] }
+          }
+        },
+        {
+          "name": "Revoke Certificate",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"reason\": \"keyCompromise\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/admin/organizations/{{orgUuid}}/certificates/:serial/revoke", "host": ["{{baseUrl}}"], "path": ["api","admin","organizations","{{orgUuid}}","certificates",":serial","revoke"], "variable": [{ "key": "serial", "value": "" }] }
+          }
+        },
+        {
+          "name": "CA PEM (public)",
+          "request": { "method": "GET", "auth": { "type": "noauth" }, "url": { "raw": "{{baseUrl}}/orgs/{{orgUuid}}/.well-known/ca.pem", "host": ["{{baseUrl}}"], "path": ["orgs","{{orgUuid}}",".well-known","ca.pem"] } }
+        },
+        {
+          "name": "CRL JSON (public)",
+          "request": { "method": "GET", "auth": { "type": "noauth" }, "url": { "raw": "{{baseUrl}}/orgs/{{orgUuid}}/.well-known/crl.json", "host": ["{{baseUrl}}"], "path": ["orgs","{{orgUuid}}",".well-known","crl.json"] } }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,1408 @@
+openapi: 3.0.3
+info:
+  title: ButtrBase API
+  description: |
+    REST + WebSocket API for the ButtrBase backend (Rust + Axum). Covers
+    auth (magic-link, MFA, OIDC, SAML), admin portal token exchange,
+    coupons & gift cards, SCIM 2.0, webhooks, domain verification,
+    per-org RS256 signing keys, mTLS CA, and the encrypted secrets vault.
+  version: "1.0.0"
+servers:
+  - url: https://stagingapi.buttrbase.com
+    description: Staging
+  - url: https://api.buttrbase.com
+    description: Production
+
+# ── Security ────────────────────────────────────────────────────────────
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Auth - Magic Link
+  - name: Auth - MFA
+  - name: Auth - OIDC
+  - name: Auth - SAML
+  - name: Admin Portal
+  - name: Coupons
+  - name: Gift Cards
+  - name: Coupon Labels
+  - name: Product Tags
+  - name: SCIM
+  - name: Webhooks
+  - name: Domains
+  - name: Signing Keys
+  - name: Vault
+  - name: mTLS
+  - name: Stream
+  - name: Well-Known
+
+paths:
+
+  # ── Magic-link ───────────────────────────────────────────────────────
+  /api/auth/magic-link/send:
+    post:
+      tags: [Auth - Magic Link]
+      summary: Send a magic-link email
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MagicLinkSendRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MagicLinkSendResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/auth/magic-link/verify:
+    post:
+      tags: [Auth - Magic Link]
+      summary: Exchange a magic-link token for an access JWT
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenOnlyRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MagicLinkVerifyResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ── MFA ──────────────────────────────────────────────────────────────
+  /api/auth/mfa/status:
+    get:
+      tags: [Auth - MFA]
+      summary: Get the caller's MFA status
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MfaStatus' }
+
+  /api/auth/mfa/totp/enroll:
+    post:
+      tags: [Auth - MFA]
+      summary: Begin TOTP enrollment (returns secret + otpauth URI)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                label: { type: string, nullable: true }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MfaEnrollResponse' }
+
+  /api/auth/mfa/totp/activate:
+    post:
+      tags: [Auth - MFA]
+      summary: Activate a pending TOTP factor with a code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MfaCodeRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MfaStatusResponse' }
+
+  /api/auth/mfa/totp/verify:
+    post:
+      tags: [Auth - MFA]
+      summary: Step-up verify a TOTP code against the active factor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MfaCodeRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MfaStatusResponse' }
+
+  /api/auth/mfa/totp/challenge:
+    post:
+      tags: [Auth - MFA]
+      summary: Trade an mfa_challenge token + code for a real access token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MfaChallengeRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MfaChallengeResponse' }
+
+  /api/auth/mfa/totp:
+    delete:
+      tags: [Auth - MFA]
+      summary: Disable TOTP for the caller
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MfaStatusResponse' }
+
+  /api/auth/mfa/recovery-codes:
+    post:
+      tags: [Auth - MFA]
+      summary: (Re)generate 10 recovery codes — returned once
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecoveryCodesResponse' }
+
+  /api/auth/mfa/recovery-codes/redeem:
+    post:
+      tags: [Auth - MFA]
+      summary: Redeem a single-use recovery code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MfaCodeRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MfaStatusResponse' }
+
+  # ── OIDC / SAML ──────────────────────────────────────────────────────
+  /api/auth/oidc/{connection_uuid}/authorize:
+    get:
+      tags: [Auth - OIDC]
+      summary: Begin an OIDC authorization (302 to IdP)
+      security: []
+      parameters:
+        - { name: connection_uuid, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '302': { description: Redirect to IdP }
+
+  /api/auth/oidc/callback:
+    get:
+      tags: [Auth - OIDC]
+      summary: OIDC IdP callback
+      security: []
+      parameters:
+        - { name: code, in: query, schema: { type: string } }
+        - { name: state, in: query, schema: { type: string } }
+      responses:
+        '302': { description: Redirect to frontend with token }
+
+  /api/auth/saml/{connection_uuid}/authorize:
+    get:
+      tags: [Auth - SAML]
+      summary: Begin a SAML AuthnRequest (302 to IdP)
+      security: []
+      parameters:
+        - { name: connection_uuid, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '302': { description: Redirect to IdP }
+
+  /api/auth/saml/callback:
+    post:
+      tags: [Auth - SAML]
+      summary: SAML ACS — receives the SAMLResponse form-post
+      security: []
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                SAMLResponse: { type: string }
+                RelayState: { type: string }
+      responses:
+        '302': { description: Redirect to frontend with token }
+
+  /api/auth/orgs-by-domain/{domain}:
+    get:
+      tags: [Auth - OIDC]
+      summary: Lookup verified org + SSO connections by email domain
+      security: []
+      parameters:
+        - { name: domain, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrgByDomainResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ── Admin Portal token exchange ──────────────────────────────────────
+  /api/admin/organizations/{org_uuid}/admin-portal/issue:
+    post:
+      tags: [Admin Portal]
+      summary: Issue a one-time admin-portal token (returned once)
+      parameters: [ { $ref: '#/components/parameters/OrgUuid' } ]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminPortalIssueResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/admin-portal/exchange:
+    post:
+      tags: [Admin Portal]
+      summary: Exchange a one-time token for a scoped admin JWT
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TokenOnlyRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminPortalExchangeResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ── Coupons + Gift Cards (public) ────────────────────────────────────
+  /api/coupons/validate:
+    post:
+      tags: [Coupons]
+      summary: Validate a coupon code (public — used by pricing page)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ValidateCouponRequest' }
+      responses:
+        '200':
+          description: Always 200 — see `valid` in body
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CouponValidation' }
+
+  /api/gift-cards/validate:
+    post:
+      tags: [Gift Cards]
+      summary: Validate a gift card code (read-only, public)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CodeOnlyRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GiftCardSummary' }
+
+  /api/gift-cards/redeem:
+    post:
+      tags: [Gift Cards]
+      summary: Atomically redeem up to amount_cents from a gift card
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RedeemGiftCardRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RedeemGiftCardResponse' }
+
+  # ── Coupon labels (admin) ────────────────────────────────────────────
+  /api/admin/coupons/{id}/labels:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: integer } }
+    put:
+      tags: [Coupon Labels]
+      summary: Replace the eligibility labels on a coupon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [labels]
+              properties:
+                labels: { type: array, items: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LabelsResponse' }
+    post:
+      tags: [Coupon Labels]
+      summary: Add a single label
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [label]
+              properties:
+                label: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LabelsResponse' }
+
+  /api/admin/coupons/{id}/labels/{label}:
+    delete:
+      tags: [Coupon Labels]
+      summary: Remove a single label
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: label, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LabelsResponse' }
+
+  # ── Product tags (admin) ─────────────────────────────────────────────
+  /api/admin/products/{id}/tags:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: integer } }
+    put:
+      tags: [Product Tags]
+      summary: Replace the tags on a product
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tags]
+              properties:
+                tags: { type: array, items: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TagsResponse' }
+    post:
+      tags: [Product Tags]
+      summary: Add a single tag
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tag]
+              properties:
+                tag: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TagsResponse' }
+
+  /api/admin/products/{id}/tags/{tag}:
+    delete:
+      tags: [Product Tags]
+      summary: Remove a single tag
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: tag, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TagsResponse' }
+
+  # ── Webhooks (admin) ─────────────────────────────────────────────────
+  /api/admin/organizations/{org_uuid}/webhook-endpoints:
+    parameters: [ { $ref: '#/components/parameters/OrgUuid' } ]
+    get:
+      tags: [Webhooks]
+      summary: List webhook endpoints
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/WebhookEndpoint' }
+    post:
+      tags: [Webhooks]
+      summary: Create a webhook endpoint (signing_secret returned once)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateWebhookEndpointRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WebhookEndpoint' }
+
+  /api/admin/organizations/{org_uuid}/webhook-endpoints/{id}:
+    delete:
+      tags: [Webhooks]
+      summary: Delete a webhook endpoint
+      parameters:
+        - { $ref: '#/components/parameters/OrgUuid' }
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '204': { description: Deleted }
+
+  /api/admin/organizations/{org_uuid}/webhook-deliveries:
+    get:
+      tags: [Webhooks]
+      summary: List recent webhook delivery attempts
+      parameters: [ { $ref: '#/components/parameters/OrgUuid' } ]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/WebhookDelivery' }
+
+  # ── Domains (admin + public lookup) ──────────────────────────────────
+  /api/admin/organizations/{org_uuid}/domains:
+    parameters: [ { $ref: '#/components/parameters/OrgUuid' } ]
+    get:
+      tags: [Domains]
+      summary: List org domains
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/DomainResponse' }
+    post:
+      tags: [Domains]
+      summary: Claim a domain (idempotent)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [domain]
+              properties:
+                domain: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DomainResponse' }
+        '409': { description: Domain already claimed by another org }
+
+  /api/admin/organizations/{org_uuid}/domains/{id}/verify:
+    post:
+      tags: [Domains]
+      summary: Trigger DNS TXT verification
+      parameters:
+        - { $ref: '#/components/parameters/OrgUuid' }
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DomainResponse' }
+
+  /api/admin/organizations/{org_uuid}/domains/{id}:
+    delete:
+      tags: [Domains]
+      summary: Unclaim a domain
+      parameters:
+        - { $ref: '#/components/parameters/OrgUuid' }
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '204': { description: Deleted }
+
+  # ── SCIM 2.0 ─────────────────────────────────────────────────────────
+  /scim/v2/ServiceProviderConfig:
+    get:
+      tags: [SCIM]
+      summary: SCIM ServiceProviderConfig
+      security: []
+      responses: { '200': { description: OK } }
+
+  /scim/v2/ResourceTypes:
+    get:
+      tags: [SCIM]
+      summary: SCIM resource types
+      security: []
+      responses: { '200': { description: OK } }
+
+  /scim/v2/Schemas:
+    get:
+      tags: [SCIM]
+      summary: SCIM schemas
+      security: []
+      responses: { '200': { description: OK } }
+
+  /scim/v2/Users:
+    get:
+      tags: [SCIM]
+      summary: List users
+      security: [ { scimBearerAuth: [] } ]
+      parameters:
+        - { name: filter, in: query, schema: { type: string }, description: 'e.g. userName eq "alice"' }
+        - { name: startIndex, in: query, schema: { type: integer } }
+        - { name: count, in: query, schema: { type: integer } }
+      responses: { '200': { description: OK } }
+    post:
+      tags: [SCIM]
+      summary: Provision a new user
+      security: [ { scimBearerAuth: [] } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScimUser' }
+      responses: { '201': { description: Created } }
+
+  /scim/v2/Users/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [SCIM]
+      summary: Get a user
+      security: [ { scimBearerAuth: [] } ]
+      responses: { '200': { description: OK } }
+    put:
+      tags: [SCIM]
+      summary: Replace a user
+      security: [ { scimBearerAuth: [] } ]
+      requestBody:
+        content: { application/json: { schema: { $ref: '#/components/schemas/ScimUser' } } }
+      responses: { '200': { description: OK } }
+    patch:
+      tags: [SCIM]
+      summary: Patch a user
+      security: [ { scimBearerAuth: [] } ]
+      requestBody:
+        content: { application/json: { schema: { $ref: '#/components/schemas/ScimPatchOp' } } }
+      responses: { '200': { description: OK } }
+    delete:
+      tags: [SCIM]
+      summary: Deactivate / delete a user
+      security: [ { scimBearerAuth: [] } ]
+      responses: { '204': { description: Deleted } }
+
+  /api/admin/organizations/{org_uuid}/scim-tokens:
+    post:
+      tags: [SCIM]
+      summary: Issue a SCIM bearer token (returned once)
+      parameters: [ { $ref: '#/components/parameters/OrgUuid' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScimTokenIssueResponse' }
+
+  # ── Per-org RS256 signing keys ───────────────────────────────────────
+  /api/admin/organizations/{org_uuid}/signing-keys:
+    get:
+      tags: [Signing Keys]
+      summary: List signing keys
+      parameters: [ { $ref: '#/components/parameters/OrgUuid' } ]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/SigningKeySummary' }
+
+  /api/admin/organizations/{org_uuid}/signing-keys/rotate:
+    post:
+      tags: [Signing Keys]
+      summary: Rotate the active signing key
+      parameters: [ { $ref: '#/components/parameters/OrgUuid' } ]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RotateRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RotateResponse' }
+
+  /api/orgs/{org_uuid}/sign:
+    post:
+      tags: [Signing Keys]
+      summary: Mint an RS256 JWT signed with the org's active key
+      parameters: [ { $ref: '#/components/parameters/OrgUuid' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SignJwtRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SignJwtResponse' }
+
+  /api/orgs/{org_uuid}/sign-document:
+    post:
+      tags: [Signing Keys]
+      summary: Detached RSA-SHA256 signature over a document
+      parameters: [ { $ref: '#/components/parameters/OrgUuid' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SignDocumentRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SignDocumentResponse' }
+
+  /orgs/{org_uuid}/.well-known/jwks.json:
+    get:
+      tags: [Well-Known]
+      summary: Org public JWKS
+      security: []
+      parameters: [ { $ref: '#/components/parameters/OrgUuid' } ]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Jwks' }
+
+  /.well-known/jwks.json:
+    get:
+      tags: [Well-Known]
+      summary: Platform-wide JWKS (legacy)
+      security: []
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/Jwks' } } }
+
+  /.well-known/openid-configuration:
+    get:
+      tags: [Well-Known]
+      summary: OpenID Connect discovery
+      security: []
+      responses: { '200': { description: OK } }
+
+  # ── mTLS CA ──────────────────────────────────────────────────────────
+  /api/admin/organizations/{org_uuid}/certificate-authority:
+    get:
+      tags: [mTLS]
+      summary: Get the org's root CA summary
+      parameters: [ { $ref: '#/components/parameters/OrgUuid' } ]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CaSummary' }
+
+  /api/admin/organizations/{org_uuid}/certificate-authority/init:
+    post:
+      tags: [mTLS]
+      summary: Initialize the org's root CA (one-shot)
+      parameters: [ { $ref: '#/components/parameters/OrgUuid' } ]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CaSummary' }
+
+  /api/admin/organizations/{org_uuid}/certificates:
+    parameters: [ { $ref: '#/components/parameters/OrgUuid' } ]
+    get:
+      tags: [mTLS]
+      summary: List issued certificates
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CertSummary' }
+    post:
+      tags: [mTLS]
+      summary: Issue a client certificate (private key returned once)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IssueCertRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IssueCertResponse' }
+
+  /api/admin/organizations/{org_uuid}/certificates/{serial}/revoke:
+    post:
+      tags: [mTLS]
+      summary: Revoke an issued certificate (idempotent)
+      parameters:
+        - { $ref: '#/components/parameters/OrgUuid' }
+        - { name: serial, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, nullable: true }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CertSummary' }
+
+  /orgs/{org_uuid}/.well-known/ca.pem:
+    get:
+      tags: [Well-Known]
+      summary: Org root CA PEM (public)
+      security: []
+      parameters: [ { $ref: '#/components/parameters/OrgUuid' } ]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/x-pem-file: { schema: { type: string } }
+
+  /orgs/{org_uuid}/.well-known/crl.json:
+    get:
+      tags: [Well-Known]
+      summary: Org CRL as JSON (public)
+      security: []
+      parameters: [ { $ref: '#/components/parameters/OrgUuid' } ]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CrlResponse' }
+
+  # ── Secrets vault ────────────────────────────────────────────────────
+  /api/admin/organizations/{org_uuid}/secrets:
+    get:
+      tags: [Vault]
+      summary: List secret names (no values)
+      parameters: [ { $ref: '#/components/parameters/OrgUuid' } ]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/SecretSummary' }
+
+  /api/admin/organizations/{org_uuid}/secrets/{name}:
+    parameters:
+      - { $ref: '#/components/parameters/OrgUuid' }
+      - { name: name, in: path, required: true, schema: { type: string } }
+    put:
+      tags: [Vault]
+      summary: Upsert a secret value (encrypted at rest)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PutSecretRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SecretSummary' }
+    delete:
+      tags: [Vault]
+      summary: Delete a secret
+      responses: { '204': { description: Deleted } }
+
+  /api/orgs/{org_uuid}/secrets/{name}:
+    get:
+      tags: [Vault]
+      summary: Read the plaintext value of a secret (audited)
+      parameters:
+        - { $ref: '#/components/parameters/OrgUuid' }
+        - { name: name, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GetSecretResponse' }
+
+  # ── Streaming query (WebSocket) ──────────────────────────────────────
+  /api/stream/query:
+    get:
+      tags: [Stream]
+      summary: WebSocket — streaming query (Brotli-framed FlatBuffer batches)
+      description: |
+        **WebSocket endpoint.** Upgrade with `Connection: Upgrade`, `Upgrade: websocket`.
+        Send a JSON `{"sql": "..."}` frame; server streams Brotli-framed FlatBuffer
+        columnar batches. Optional COPY TO STDOUT mode triggers automatically for
+        result sets larger than ~10K rows.
+      responses:
+        '101': { description: Switching Protocols (WebSocket) }
+
+# ── Components ──────────────────────────────────────────────────────────
+components:
+  parameters:
+    OrgUuid:
+      name: org_uuid
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Bearer JWT (or `sk_*` API key) issued by ButtrBase auth flows.
+    scimBearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        Per-org SCIM bearer token. Distinct from the regular `bearerAuth` — these
+        tokens are issued via `POST /api/admin/organizations/{org_uuid}/scim-tokens`
+        and only authorize SCIM 2.0 endpoints.
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+        message: { type: string }
+
+    TokenOnlyRequest:
+      type: object
+      required: [token]
+      properties:
+        token: { type: string }
+
+    CodeOnlyRequest:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string }
+
+    # ── Magic link ─────────────────────────────────────────
+    MagicLinkSendRequest:
+      type: object
+      required: [email]
+      properties:
+        email: { type: string, format: email }
+        org_uuid: { type: string, format: uuid, nullable: true }
+        redirect_to: { type: string, nullable: true }
+
+    MagicLinkSendResponse:
+      type: object
+      properties:
+        sent: { type: boolean }
+        dev_token: { type: string, nullable: true }
+        expires_in_seconds: { type: integer, format: int64 }
+
+    MagicLinkVerifyResponse:
+      type: object
+      properties:
+        access_token: { type: string }
+        token_type: { type: string, example: Bearer }
+        user:
+          type: object
+          properties:
+            user_uuid: { type: string, format: uuid }
+            email: { type: string, format: email }
+        redirect_to: { type: string, nullable: true }
+
+    # ── MFA ────────────────────────────────────────────────
+    MfaStatus:
+      type: object
+      properties:
+        has_active_totp: { type: boolean }
+        has_pending_totp: { type: boolean }
+        has_recovery_codes: { type: boolean }
+
+    MfaCodeRequest:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string }
+
+    MfaStatusResponse:
+      type: object
+      properties:
+        status: { type: string, example: active }
+
+    MfaEnrollResponse:
+      type: object
+      properties:
+        factor_id: { type: integer }
+        secret: { type: string, description: Base32 TOTP secret (returned once) }
+        otpauth_uri: { type: string }
+        status: { type: string }
+
+    RecoveryCodesResponse:
+      type: object
+      properties:
+        codes:
+          type: array
+          items: { type: string }
+
+    MfaChallengeRequest:
+      type: object
+      required: [mfa_token, code]
+      properties:
+        mfa_token: { type: string }
+        code: { type: string }
+        recovery: { type: boolean, default: false }
+
+    MfaChallengeResponse:
+      type: object
+      properties:
+        access_token: { type: string }
+        token_type: { type: string, example: Bearer }
+
+    # ── OIDC lookup ────────────────────────────────────────
+    OrgByDomainResponse:
+      type: object
+      properties:
+        org_uuid: { type: string, format: uuid }
+        sso_connections:
+          type: array
+          items:
+            type: object
+            properties:
+              connection_uuid: { type: string, format: uuid }
+              kind: { type: string, enum: [oidc, saml] }
+              display_name: { type: string }
+
+    # ── Admin portal ───────────────────────────────────────
+    AdminPortalIssueResponse:
+      type: object
+      properties:
+        url: { type: string }
+        token: { type: string }
+        expires_in_seconds: { type: integer, format: int64 }
+
+    AdminPortalExchangeResponse:
+      type: object
+      properties:
+        access_token: { type: string }
+        token_type: { type: string, example: Bearer }
+        org_uuid: { type: string, format: uuid }
+        expires_in_seconds: { type: integer, format: int64 }
+
+    # ── Coupons / Gift cards ───────────────────────────────
+    ValidateCouponRequest:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string }
+        product_id: { type: integer, nullable: true }
+        cart_labels:
+          type: array
+          items: { type: string }
+
+    CouponValidation:
+      type: object
+      properties:
+        valid: { type: boolean }
+        discount_type: { type: string, enum: [percentage, fixed_amount], nullable: true }
+        discount_value: { type: integer, nullable: true }
+        duration: { type: string, enum: [once, forever, repeating], nullable: true }
+        duration_in_months: { type: integer, nullable: true }
+        expires_at: { type: string, format: date-time, nullable: true }
+        error: { type: string, nullable: true }
+
+    GiftCardSummary:
+      type: object
+      properties:
+        valid: { type: boolean }
+        remaining_balance_cents: { type: integer, format: int64, nullable: true }
+        currency: { type: string, nullable: true }
+        expires_at: { type: string, format: date-time, nullable: true }
+        error: { type: string, nullable: true }
+
+    RedeemGiftCardRequest:
+      type: object
+      required: [code, amount_cents]
+      properties:
+        code: { type: string }
+        amount_cents: { type: integer, format: int64 }
+        user_id: { type: integer, nullable: true }
+
+    RedeemGiftCardResponse:
+      type: object
+      properties:
+        success: { type: boolean }
+        amount_applied_cents: { type: integer, format: int64, nullable: true }
+        remaining_balance_cents: { type: integer, format: int64, nullable: true }
+        currency: { type: string, nullable: true }
+        error: { type: string, nullable: true }
+
+    LabelsResponse:
+      type: object
+      properties:
+        coupon_id: { type: integer }
+        applies_to_labels:
+          type: array
+          items: { type: string }
+
+    TagsResponse:
+      type: object
+      properties:
+        product_id: { type: integer }
+        tags:
+          type: array
+          items: { type: string }
+
+    # ── Webhooks ───────────────────────────────────────────
+    CreateWebhookEndpointRequest:
+      type: object
+      required: [url]
+      properties:
+        url: { type: string, format: uri }
+        event_types:
+          type: array
+          nullable: true
+          items: { type: string }
+        description: { type: string, nullable: true }
+
+    WebhookEndpoint:
+      type: object
+      properties:
+        id: { type: integer }
+        url: { type: string, format: uri }
+        event_types:
+          type: array
+          items: { type: string }
+        description: { type: string, nullable: true }
+        is_active: { type: boolean }
+        signing_secret:
+          type: string
+          nullable: true
+          description: Returned ONCE on create — store securely.
+
+    WebhookDelivery:
+      type: object
+      properties:
+        id: { type: integer }
+        endpoint_id: { type: integer }
+        event_type: { type: string }
+        attempted_at: { type: string, format: date-time }
+        status_code: { type: integer, nullable: true }
+        response_snippet: { type: string, nullable: true }
+        ok: { type: boolean }
+
+    # ── Domains ────────────────────────────────────────────
+    DomainResponse:
+      type: object
+      properties:
+        id: { type: integer }
+        domain: { type: string }
+        status: { type: string, example: pending }
+        expected_record: { type: string }
+        expected_value: { type: string }
+        verified_at: { type: string, format: date-time, nullable: true }
+        last_check_at: { type: string, format: date-time, nullable: true }
+        last_check_error: { type: string, nullable: true }
+
+    # ── SCIM ───────────────────────────────────────────────
+    ScimUser:
+      type: object
+      properties:
+        schemas:
+          type: array
+          items: { type: string }
+        userName: { type: string }
+        externalId: { type: string, nullable: true }
+        active: { type: boolean }
+        emails:
+          type: array
+          items:
+            type: object
+            properties:
+              value: { type: string, format: email }
+              primary: { type: boolean }
+        name:
+          type: object
+          properties:
+            givenName: { type: string, nullable: true }
+            familyName: { type: string, nullable: true }
+            formatted: { type: string, nullable: true }
+
+    ScimPatchOp:
+      type: object
+      properties:
+        schemas:
+          type: array
+          items: { type: string }
+        Operations:
+          type: array
+          items:
+            type: object
+            properties:
+              op: { type: string, enum: [add, replace, remove] }
+              path: { type: string, nullable: true }
+              value: {}
+
+    ScimTokenIssueResponse:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        token: { type: string, description: Returned ONCE — store securely. }
+
+    # ── Signing keys ───────────────────────────────────────
+    SigningKeySummary:
+      type: object
+      properties:
+        kid: { type: string }
+        status: { type: string, enum: [active, retired] }
+        created_at: { type: string, format: date-time }
+        rotated_at: { type: string, format: date-time, nullable: true }
+        expires_at: { type: string, format: date-time, nullable: true }
+
+    RotateRequest:
+      type: object
+      properties:
+        grace_days: { type: integer, format: int64, nullable: true }
+        scopes:
+          type: array
+          items: { type: string }
+
+    RotateResponse:
+      type: object
+      properties:
+        kid: { type: string }
+        created_at: { type: string, format: date-time }
+        retired_kids:
+          type: array
+          items: { type: string }
+        jwks_url: { type: string, format: uri }
+
+    SignJwtRequest:
+      type: object
+      required: [claims]
+      properties:
+        claims:
+          type: object
+          additionalProperties: true
+        ttl_seconds: { type: integer, format: int64, nullable: true }
+
+    SignJwtResponse:
+      type: object
+      properties:
+        token: { type: string }
+        kid: { type: string }
+        exp: { type: integer, format: int64 }
+
+    SignDocumentRequest:
+      type: object
+      required: [document_b64]
+      properties:
+        document_b64: { type: string, description: Base64 of the document bytes }
+
+    SignDocumentResponse:
+      type: object
+      properties:
+        signature_b64: { type: string }
+        kid: { type: string }
+        algorithm: { type: string, example: RS256 }
+        signed_at: { type: string, format: date-time }
+
+    Jwks:
+      type: object
+      properties:
+        keys:
+          type: array
+          items:
+            type: object
+            properties:
+              kty: { type: string }
+              kid: { type: string }
+              use: { type: string }
+              alg: { type: string }
+              n: { type: string }
+              e: { type: string }
+
+    # ── mTLS ───────────────────────────────────────────────
+    CaSummary:
+      type: object
+      properties:
+        common_name: { type: string }
+        issued_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        root_cert_pem: { type: string }
+
+    IssueCertRequest:
+      type: object
+      required: [common_name]
+      properties:
+        common_name: { type: string }
+        sans:
+          type: array
+          items: { type: string }
+        ttl_days: { type: integer, format: int64, nullable: true }
+        service_identity_id: { type: integer, nullable: true }
+
+    IssueCertResponse:
+      type: object
+      properties:
+        serial_number: { type: string }
+        common_name: { type: string }
+        issued_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        fingerprint_sha256: { type: string }
+        cert_pem: { type: string }
+        private_key_pem: { type: string, description: Returned ONCE — save now. }
+
+    CertSummary:
+      type: object
+      properties:
+        serial_number: { type: string }
+        common_name: { type: string }
+        sans:
+          type: array
+          items: { type: string }
+        fingerprint_sha256: { type: string }
+        issued_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        revoked_at: { type: string, format: date-time, nullable: true }
+        revoke_reason: { type: string, nullable: true }
+        service_identity_id: { type: integer, nullable: true }
+
+    CrlEntry:
+      type: object
+      properties:
+        serial_number: { type: string }
+        revoked_at: { type: string, format: date-time }
+        reason: { type: string, nullable: true }
+
+    CrlResponse:
+      type: object
+      properties:
+        org_uuid: { type: string, format: uuid }
+        generated_at: { type: string, format: date-time }
+        revoked:
+          type: array
+          items: { $ref: '#/components/schemas/CrlEntry' }
+
+    # ── Vault ──────────────────────────────────────────────
+    PutSecretRequest:
+      type: object
+      required: [value]
+      properties:
+        value: { type: string }
+        description: { type: string, nullable: true }
+
+    SecretSummary:
+      type: object
+      properties:
+        name: { type: string }
+        description: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        last_fetched_at: { type: string, format: date-time, nullable: true }
+
+    GetSecretResponse:
+      type: object
+      properties:
+        name: { type: string }
+        value: { type: string }
+        cache_until: { type: string, format: date-time }
