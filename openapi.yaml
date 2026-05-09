@@ -35,6 +35,14 @@ tags:
   - name: mTLS
   - name: Stream
   - name: Well-Known
+  - name: Auth - Step-Up
+  - name: JIT Elevation
+  - name: SPIFFE
+  - name: Auth Events
+  - name: Re-encrypt
+  - name: Sessions
+  - name: Org Metrics
+  - name: OCSP
 
 paths:
 
@@ -917,6 +925,265 @@ paths:
       responses:
         '101': { description: Switching Protocols (WebSocket) }
 
+  # ── Step-up auth ─────────────────────────────────────────────────────
+  /api/auth/step-up:
+    post:
+      tags: [Auth - Step-Up]
+      summary: Step-up to a short-lived (5min) elevated token
+      description: |
+        Verifies a TOTP code (or recovery code if `recovery: true`) against the
+        caller's active MFA factor and returns a NEW access token whose JWT
+        carries `step_up: true` for 5 minutes. The step-up claim is required
+        by high-blast-radius admin endpoints (secrets put/delete, mtls_ca
+        init/issue/revoke, signing-keys rotate, sessions/revoke, all
+        re-encrypt-all endpoints, JIT grant approve).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StepUpRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StepUpResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ── JIT privilege elevation ──────────────────────────────────────────
+  /api/admin/organizations/{org_uuid}/elevation/request:
+    post:
+      tags: [JIT Elevation]
+      summary: Request a JIT privilege-elevation grant (4-eyes — needs separate approver)
+      description: |
+        After 2026-05-08 all JIT grants require four-eyes: a different admin
+        must call the `/approve` endpoint. Self-approval is rejected with 403.
+        The returned `GrantView` is in `pending` status until approved.
+      parameters: [ { $ref: '#/components/parameters/OrgUuid' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ElevationRequestRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GrantView' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/admin/organizations/{org_uuid}/elevation/{grant_uuid}/approve:
+    post:
+      tags: [JIT Elevation]
+      summary: Approve a pending JIT grant (must be a DIFFERENT admin; requires step-up)
+      description: |
+        Four-eyes enforcement: returns 403 if the caller is the same admin who
+        requested the grant. Approver must hold a `step_up: true` token —
+        call `POST /api/auth/step-up` first.
+      parameters:
+        - { $ref: '#/components/parameters/OrgUuid' }
+        - { name: grant_uuid, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GrantView' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/admin/organizations/{org_uuid}/elevation:
+    get:
+      tags: [JIT Elevation]
+      summary: List JIT elevation grants for the org
+      parameters:
+        - { $ref: '#/components/parameters/OrgUuid' }
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, approved, expired, used, denied]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/GrantView' }
+
+  # ── SPIFFE workload attestation ──────────────────────────────────────
+  /api/admin/organizations/{org_uuid}/spiffe/svid:
+    post:
+      tags: [SPIFFE]
+      summary: Issue a SPIFFE SVID for a workload (private key returned once)
+      description: |
+        Issues an X.509-SVID for the given workload. The resulting SPIFFE ID has
+        the form `spiffe://{org_uuid}.buttrbase/{workload_path}`. `workload_path`
+        must match `[a-zA-Z0-9-_/]{1,128}` with no leading or trailing `/`. TTL
+        is clamped to 60..86400 seconds (default 3600).
+      parameters: [ { $ref: '#/components/parameters/OrgUuid' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SpiffeSvidRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SpiffeSvidResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  # ── Context-aware access (auth events) ───────────────────────────────
+  /api/admin/organizations/{org_uuid}/auth-events:
+    get:
+      tags: [Auth Events]
+      summary: List recent authentication events for risk-scoring review
+      parameters:
+        - { $ref: '#/components/parameters/OrgUuid' }
+        - { name: user_uuid, in: query, schema: { type: string, format: uuid } }
+        - name: limit
+          in: query
+          description: Max 500, default 50
+          schema: { type: integer, minimum: 1, maximum: 500, default: 50 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AuthEventView' }
+
+  # ── Re-encrypt-all (admin) ───────────────────────────────────────────
+  /api/admin/organizations/{org_uuid}/secrets/re-encrypt:
+    post:
+      tags: [Re-encrypt]
+      summary: Re-encrypt all org secrets to the current KEK version
+      description: |
+        Requires `step_up: true` on the caller's JWT (call `POST /api/auth/step-up`
+        first) AND an active JIT grant with scope `secrets:re-encrypt`.
+      parameters: [ { $ref: '#/components/parameters/OrgUuid' } ]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReencryptResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/admin/organizations/{org_uuid}/signing-keys/re-encrypt:
+    post:
+      tags: [Re-encrypt]
+      summary: Re-encrypt all org signing-key private material to the current KEK version
+      description: Requires `step_up: true` on the caller's JWT.
+      parameters: [ { $ref: '#/components/parameters/OrgUuid' } ]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReencryptResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/admin/organizations/{org_uuid}/mtls-ca/re-encrypt:
+    post:
+      tags: [Re-encrypt]
+      summary: Re-encrypt the org's mTLS CA private key to the current KEK version
+      description: Requires `step_up: true` on the caller's JWT.
+      parameters: [ { $ref: '#/components/parameters/OrgUuid' } ]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReencryptResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ── Session revocation ───────────────────────────────────────────────
+  /api/admin/sessions/revoke:
+    post:
+      tags: [Sessions]
+      summary: Revoke a session by JWT id (jti) until expiry
+      description: |
+        Adds the `jti` to the revocation set so any token bearing that id is
+        rejected until `revoked_until_unix`. Requires `step_up: true` on the
+        caller's JWT (call `POST /api/auth/step-up` first).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SessionRevokeRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionRevokeResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ── Org metrics ──────────────────────────────────────────────────────
+  /api/admin/organizations/{org_uuid}/metrics:
+    get:
+      tags: [Org Metrics]
+      summary: Per-org security/operations metrics snapshot
+      parameters: [ { $ref: '#/components/parameters/OrgUuid' } ]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrgMetrics' }
+
+  # ── OCSP responder (public) ──────────────────────────────────────────
+  /ocsp/{org_uuid}:
+    post:
+      tags: [OCSP]
+      summary: OCSP responder (RFC 6960) — POST form
+      description: |
+        Accepts a DER-encoded `OCSPRequest` as the body and returns a DER-encoded
+        `OCSPResponse`. Supported response statuses include `successful` (0),
+        `malformedRequest` (1) and `unauthorized` (6). On `successful` the
+        response is a signed `BasicOcspResponse` per RFC 6960.
+      security: []
+      parameters: [ { $ref: '#/components/parameters/OrgUuid' } ]
+      requestBody:
+        required: true
+        content:
+          application/ocsp-request:
+            schema: { type: string, format: binary }
+      responses:
+        '200':
+          description: OCSP response (DER)
+          content:
+            application/ocsp-response:
+              schema: { type: string, format: binary }
+        '400': { description: malformedRequest }
+        '401': { description: unauthorized }
+
+  /ocsp/{org_uuid}/{b64_request}:
+    get:
+      tags: [OCSP]
+      summary: OCSP responder (RFC 6960 §A.1 GET form)
+      description: |
+        GET form per RFC 6960 §A.1 — `b64_request` is the URL-safe base64
+        encoding of the DER-encoded `OCSPRequest`. Returns a DER-encoded
+        `OCSPResponse` (signed `BasicOcspResponse` on success).
+      security: []
+      parameters:
+        - { $ref: '#/components/parameters/OrgUuid' }
+        - { name: b64_request, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OCSP response (DER)
+          content:
+            application/ocsp-response:
+              schema: { type: string, format: binary }
+        '400': { description: malformedRequest }
+        '401': { description: unauthorized }
+
 # ── Components ──────────────────────────────────────────────────────────
 components:
   parameters:
@@ -1406,3 +1673,138 @@ components:
         name: { type: string }
         value: { type: string }
         cache_until: { type: string, format: date-time }
+
+    # ── Step-up ────────────────────────────────────────────
+    StepUpRequest:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string, description: TOTP code, or recovery code if `recovery: true` }
+        recovery: { type: boolean, default: false }
+
+    StepUpResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+          description: New JWT carrying `step_up: true` for 5 minutes.
+        token_type: { type: string, example: Bearer }
+        expires_in_seconds: { type: integer, format: int64, example: 300 }
+
+    # ── JIT elevation ──────────────────────────────────────
+    ElevationRequestRequest:
+      type: object
+      required: [scope]
+      properties:
+        scope:
+          type: string
+          description: |
+            Privilege scope to elevate, e.g. `mtls-ca:init`,
+            `signing-keys:rotate`, `secrets:re-encrypt`.
+        reason: { type: string, nullable: true }
+        ttl_seconds: { type: integer, format: int64, nullable: true }
+
+    GrantView:
+      type: object
+      properties:
+        grant_uuid: { type: string, format: uuid }
+        scope: { type: string }
+        status:
+          type: string
+          enum: [pending, approved, expired, used, denied]
+        requested_by: { type: string, format: uuid }
+        approved_by: { type: string, format: uuid, nullable: true }
+        requested_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        reason: { type: string, nullable: true }
+        self_approval_allowed:
+          type: boolean
+          enum: [false]
+          description: Always false — four-eyes is enforced after 2026-05-08.
+
+    # ── SPIFFE ─────────────────────────────────────────────
+    SpiffeSvidRequest:
+      type: object
+      required: [workload_path]
+      properties:
+        workload_path:
+          type: string
+          pattern: '^[a-zA-Z0-9-_/]{1,128}$'
+          description: |
+            Workload path appended to the org's SPIFFE trust domain. Must match
+            `[a-zA-Z0-9-_/]{1,128}` and must not start or end with `/`.
+        ttl_seconds:
+          type: integer
+          format: int64
+          minimum: 60
+          maximum: 86400
+          default: 3600
+          nullable: true
+
+    SpiffeSvidResponse:
+      type: object
+      properties:
+        spiffe_id:
+          type: string
+          description: 'Form: `spiffe://{org_uuid}.buttrbase/{workload_path}`'
+        svid_pem: { type: string }
+        private_key_pem: { type: string, description: Returned ONCE — save now. }
+        issued_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+
+    # ── Auth events ────────────────────────────────────────
+    AuthEventView:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        user_uuid: { type: string, format: uuid }
+        event_type:
+          type: string
+          enum:
+            - login.magic_link
+            - login.oidc
+            - login.saml
+            - login.admin_portal
+            - token.org_sign
+            - auth.step_up
+        ip: { type: string, nullable: true }
+        user_agent: { type: string, nullable: true }
+        country: { type: string, nullable: true }
+        risk_score: { type: integer }
+        created_at: { type: string, format: date-time }
+
+    # ── Re-encrypt ─────────────────────────────────────────
+    ReencryptResponse:
+      type: object
+      properties:
+        secrets_re_encrypted: { type: integer }
+        already_current: { type: integer }
+        target_version: { type: integer }
+
+    # ── Sessions ───────────────────────────────────────────
+    SessionRevokeRequest:
+      type: object
+      required: [jti]
+      properties:
+        jti: { type: string }
+        ttl_seconds: { type: integer, format: int64, nullable: true }
+
+    SessionRevokeResponse:
+      type: object
+      properties:
+        jti: { type: string }
+        revoked_until_unix: { type: integer, format: int64 }
+
+    # ── Org metrics ────────────────────────────────────────
+    OrgMetrics:
+      type: object
+      properties:
+        signing_keys_active: { type: integer }
+        signing_keys_retired_in_grace: { type: integer }
+        jwts_minted_24h: { type: integer, format: int64 }
+        documents_signed_24h: { type: integer, format: int64 }
+        key_rotations_24h: { type: integer }
+        secrets_count: { type: integer }
+        certs_active: { type: integer }
+        certs_revoked: { type: integer }
+        generated_at: { type: string, format: date-time }
