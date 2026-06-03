@@ -18,6 +18,19 @@ security:
   - bearerAuth: []
 
 tags:
+  - name: Auth - Registration
+    description: |
+      Email-verified signup flow (OTP + finalize-registration) and the org
+      selection that goes with it. Replaces the legacy `/api/auth/register`
+      endpoint, which is still served for SDK 0.2.x backward compatibility
+      but is deprecated.
+  - name: Org Invitations
+    description: |
+      Admin-created invitation tokens that let an existing org bring in new
+      members. Token is shown to the inviter ONCE on create; we only store
+      a hash. The accept flow is split between this section (logged-in
+      users) and `Auth - Registration` (brand-new users use `OrgChoice.AcceptInvite`
+      inside `/api/auth/finalize-registration`).
   - name: Auth - Magic Link
   - name: Auth - MFA
   - name: Auth - OIDC
@@ -1078,7 +1091,7 @@ paths:
     post:
       tags: [Re-encrypt]
       summary: Re-encrypt all org signing-key private material to the current KEK version
-      description: Requires `step_up: true` on the caller's JWT.
+      description: "Requires `step_up: true` on the caller's JWT."
       parameters: [ { $ref: '#/components/parameters/OrgUuid' } ]
       responses:
         '200':
@@ -1092,7 +1105,7 @@ paths:
     post:
       tags: [Re-encrypt]
       summary: Re-encrypt the org's mTLS CA private key to the current KEK version
-      description: Requires `step_up: true` on the caller's JWT.
+      description: "Requires `step_up: true` on the caller's JWT."
       parameters: [ { $ref: '#/components/parameters/OrgUuid' } ]
       responses:
         '200':
@@ -1184,6 +1197,201 @@ paths:
         '400': { description: malformedRequest }
         '401': { description: unauthorized }
 
+  # ── Registration (replaces /api/auth/register for SDK 0.3+) ──────────
+  /api/auth/finalize-registration:
+    post:
+      tags: [Auth - Registration]
+      summary: Finalize a registration with an explicit org choice
+      description: |
+        The new clean-API replacement for `POST /api/auth/register`. Takes an
+        explicit `org_choice` (create a new org by name, OR consume an
+        invitation), validates everything upfront, and finishes setting up the
+        user. Returns session tokens so the client can chain a follow-up call
+        without a separate sign-in round-trip.
+
+        Flow:
+        1. `POST /api/auth/otp` — start email verification.
+        2. `POST /api/auth/otp/verify` — exchange code for `signup_token`.
+        3. **`POST /api/auth/finalize-registration`** — this endpoint.
+
+        Replaces the legacy `/api/auth/register` which always auto-created an
+        org named after the email's domain — that broke the second person to
+        sign up from any domain and made invitations impossible.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FinalizeRegistrationRequest' }
+      responses:
+        '200':
+          description: User registered + session issued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinalizeRegistrationResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Invitation revoked / expired / email mismatch }
+        '404': { description: Invitation not found }
+        '409': { description: Org name already taken OR user already in this app }
+
+  /api/auth/check-org-name:
+    get:
+      tags: [Auth - Registration]
+      summary: Live availability + format check for a proposed org name
+      description: |
+        Public. Used by the signup UI to live-debounce-check whether an org
+        name is acceptable before the user submits. Trims whitespace; rejects
+        empty, too-short, too-long, or control-char names; rejects duplicates.
+      security: []
+      parameters:
+        - in: query
+          name: name
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CheckOrgNameResponse' }
+
+  # ── Org Invitations ─────────────────────────────────────────────────
+  /api/auth/invitations/{token}:
+    get:
+      tags: [Org Invitations]
+      summary: Public preview of an invitation token
+      description: |
+        Public (no auth). Returns org context (name, role, expiry, validity)
+        for a given invitation token, so a signup page can show "You're
+        invited to join Acme Inc as member" before the user fills out
+        anything. Never returns the raw token.
+      security: []
+      parameters:
+        - in: path
+          name: token
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK (check `valid` + `invalid_reason` on the body)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/InvitationPreview' }
+
+  /api/auth/invitations/{token}/accept:
+    post:
+      tags: [Org Invitations]
+      summary: Accept an invitation as an already-signed-in user
+      description: |
+        For users who already have a buttrbase session and are joining an
+        additional org via invite. Brand-new users consume the invitation as
+        part of `/api/auth/finalize-registration` via `OrgChoice.AcceptInvite`.
+        Idempotent: re-accepting an already-accepted invite that this user
+        is already a member of returns the same response.
+      parameters:
+        - in: path
+          name: token
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Joined org
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/AcceptInvitationResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Invitation revoked / expired / email mismatch }
+        '404': { description: Invitation not found }
+        '409': { description: Already accepted }
+
+  /api/orgs/{org_uuid}/invitations:
+    get:
+      tags: [Org Invitations]
+      summary: List invitations for an org
+      description: Admin/owner only. Returns pending + historical invitations.
+      parameters:
+        - { $ref: '#/components/parameters/OrgUuid' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/InvitationListItem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Not an admin of this org }
+        '404': { description: Org not found }
+    post:
+      tags: [Org Invitations]
+      summary: Create a new invitation
+      description: |
+        Admin/owner only. Creates an `org_invitations` row + returns the
+        plaintext token + a ready-to-share `signup_url` containing the
+        token in `?invite=`.
+
+        The plaintext token is shown ONCE in this response — the server
+        only stores its SHA-256 hash. Inviter must capture the value here
+        (or the `signup_url`) before the response is dismissed.
+      parameters:
+        - { $ref: '#/components/parameters/OrgUuid' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateInvitationRequest' }
+      responses:
+        '200':
+          description: Invitation created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/CreateInvitationResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Not an admin of this org }
+        '404': { description: Org not found }
+
+  /api/orgs/{org_uuid}/invitations/{invitation_id}:
+    delete:
+      tags: [Org Invitations]
+      summary: Revoke a pending invitation
+      description: |
+        Admin/owner only. Marks the invitation as revoked. Already-accepted
+        invitations cannot be revoked (no effect; status remains accepted).
+      parameters:
+        - { $ref: '#/components/parameters/OrgUuid' }
+        - in: path
+          name: invitation_id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      revoked: { type: integer, description: Rows affected (0 or 1) }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Not an admin of this org }
+        '404': { description: Invitation not found }
+
 # ── Components ──────────────────────────────────────────────────────────
 components:
   parameters:
@@ -1247,6 +1455,154 @@ components:
       required: [code]
       properties:
         code: { type: string }
+
+    # ── Registration ────────────────────────────────────────
+    OrgChoice:
+      type: object
+      description: |
+        Tagged enum: what to do about the org during finalize-registration.
+        Use exactly one of `{type: create, name}` or
+        `{type: accept_invite, invitation_token}`.
+      oneOf:
+        - title: Create
+          type: object
+          required: [type, name]
+          properties:
+            type: { type: string, enum: [create] }
+            name:
+              type: string
+              minLength: 2
+              maxLength: 64
+              description: |
+                Display name for the new org. Trimmed of leading/trailing
+                whitespace. Server enforces uniqueness (409 if already taken).
+                Rejects control chars, angle brackets, quotes, slashes,
+                backslashes, newlines, tabs.
+        - title: AcceptInvite
+          type: object
+          required: [type, invitation_token]
+          properties:
+            type: { type: string, enum: [accept_invite] }
+            invitation_token:
+              type: string
+              description: |
+                The plaintext token from `POST /api/orgs/.../invitations` (or
+                from a `?invite=` URL param). Server hashes + looks up.
+
+    FinalizeRegistrationRequest:
+      type: object
+      required: [email, password, app_uuid, signup_token, org_choice]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, format: password, minLength: 8 }
+        first_name: { type: string, nullable: true }
+        last_name: { type: string, nullable: true }
+        app_uuid: { type: string, format: uuid }
+        signup_token:
+          type: string
+          description: Short-lived JWT issued by `/api/auth/otp/verify`.
+        org_choice: { $ref: '#/components/schemas/OrgChoice' }
+
+    FinalizeRegistrationResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            message: { type: string }
+            user_uuid: { type: string, format: uuid }
+            access_token: { type: string }
+            refresh_token: { type: string }
+            token_type: { type: string, example: Bearer }
+            expires_in: { type: integer }
+
+    CheckOrgNameResponse:
+      type: object
+      properties:
+        available: { type: boolean }
+        reason:
+          type: string
+          nullable: true
+          enum: [empty, too_short, too_long, invalid_chars, taken]
+        normalized:
+          type: string
+          description: The trimmed value the server would actually store.
+
+    # ── Org Invitations ────────────────────────────────────
+    CreateInvitationRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          nullable: true
+          description: |
+            Optional. If set, accept enforces matching email. NULL invitations
+            are open links (good for sharing in team Slack).
+        role:
+          type: string
+          nullable: true
+          default: member
+          description: Role granted to whoever accepts. Defaults to `member`.
+        expires_in_hours:
+          type: integer
+          nullable: true
+          default: 168
+          minimum: 1
+          maximum: 720
+          description: Lifetime of the invite. Server-clamped to [1h, 30d].
+
+    CreateInvitationResponse:
+      type: object
+      properties:
+        id: { type: integer }
+        org_uuid: { type: string, format: uuid }
+        email: { type: string, nullable: true }
+        role: { type: string }
+        expires_at: { type: string, format: date-time }
+        token:
+          type: string
+          description: |
+            **PLAINTEXT token — returned exactly once.** The server only
+            stores `SHA-256(token)`. If the inviter doesn't capture it
+            here it cannot be re-fetched.
+        signup_url:
+          type: string
+          description: |
+            Ready-to-share URL containing the token in `?invite=`. The
+            frontend's signup flow reads that and prefills the
+            `OrgChoice.AcceptInvite` branch.
+
+    InvitationPreview:
+      type: object
+      properties:
+        org_uuid: { type: string, format: uuid }
+        org_name: { type: string }
+        email: { type: string, nullable: true }
+        role: { type: string }
+        expires_at: { type: string, format: date-time }
+        valid: { type: boolean }
+        invalid_reason:
+          type: string
+          nullable: true
+          enum: [expired, accepted, revoked, not_found]
+
+    AcceptInvitationResponse:
+      type: object
+      properties:
+        org_uuid: { type: string, format: uuid }
+        org_name: { type: string }
+        role: { type: string }
+
+    InvitationListItem:
+      type: object
+      properties:
+        id: { type: integer }
+        email: { type: string, nullable: true }
+        role: { type: string }
+        expires_at: { type: string, format: date-time }
+        accepted_at: { type: string, format: date-time, nullable: true }
+        revoked_at: { type: string, format: date-time, nullable: true }
 
     # ── Magic link ─────────────────────────────────────────
     MagicLinkSendRequest:
@@ -1687,7 +2043,7 @@ components:
       properties:
         access_token:
           type: string
-          description: New JWT carrying `step_up: true` for 5 minutes.
+          description: "New JWT carrying `step_up: true` for 5 minutes."
         token_type: { type: string, example: Bearer }
         expires_in_seconds: { type: integer, format: int64, example: 300 }
 
